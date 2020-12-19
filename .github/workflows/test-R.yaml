@@ -1,0 +1,61 @@
+on:
+  pull_request:
+    branches:
+      - master
+      - staging
+
+name: test-R
+
+jobs:
+  test-R:
+    # Use a linux machine to run tests - they're far less expensive and match
+    # our production environment.
+    runs-on: ubuntu-latest
+    env:
+      # If any R package dependencies come from private lks-chart github repos,
+      # the  GITHUB_PAT env variable needs to be set to a Personal Access Token
+      # to authenticate installing these remotes. You must also have created a
+      # GH secret called "PAT" to store your access token (see clickup docs for
+      # more details)
+      GITHUB_PAT: ${{ secrets.PAT }}
+    steps:
+      - uses: actions/checkout@v2
+
+      # Just incase this directory doesn't already exist, create it
+      - name: Make Rlib dir
+        run: mkdir -p ~/.local/share/renv
+
+      - uses: r-lib/actions/setup-r@v1
+        with:
+          r-version: 3.6
+
+      # Linux dependencies needed for installing remotes
+      - name: Install libcurl
+        run: sudo apt-get install libcurl4-openssl-dev
+
+      # Cache packages installed to ~/.local/share/renv, based on a hash of
+      # renv.lock so we don't have to re-install R packages each run. Otherwise
+      # this workflow will take 10-15 minutes each time.
+      - name: Cache R packages
+        uses: actions/cache@v2
+        id: cache
+        with:
+          path: ~/.local/share/renv
+          key: ${{runner.os  }}-renv-${{ hashFiles('**/renv.lock') }}
+          restore-keys: ${{ runner.os }}-renv-
+
+      # Install renv if it isn't already
+      - name: Install renv
+        run: if (!("renv" %in% installed.packages())) install.packages("renv")
+        shell: Rscript {0}
+
+      # Run devtools::test, stop_on_failure ensusures that this step fails if a
+      # test case does not pass (results of all tests are still shown).
+      - name: Run Tests
+        run: |
+          renv::restore()
+          if (!("devtools" %in% installed.packages())) install.packages("devtools")
+          devtools::test(pkg = "./pkg", stop_on_failure=TRUE)
+        shell: Rscript {0}
+        env:
+          GITHUB_PAT: ${{ secrets.PAT }}
